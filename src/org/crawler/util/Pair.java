@@ -1,4 +1,4 @@
-package org.crawler;
+package org.crawler.util;
 
 public class Pair<L,R> {
 

@@ -12,9 +12,10 @@ public class CrawlerManager {
 	private static Logger LOGGER = Logger.getLogger(CrawlerManager.class.getName());
 	
 	private static CrawlerManager instance;
-	private Crawler crawler;
+    private Crawler crawler;
 	private ThreadPoolExecutor executor;
     private CrawlerThreadFactory factory;
+
 
     public static CrawlerManager getInstance() {
         if(instance == null) {
@@ -49,6 +50,20 @@ public class CrawlerManager {
         else return 0;
     }
 
+    public long getCompletedCount() {
+        if(executor!=null) {
+            return executor.getCompletedTaskCount();
+        }
+        else return 0;
+    }
+
+    public int getCurrentSize() {
+        if(executor!=null) {
+            return executor.getActiveCount();
+        }
+        else return 0;
+    }
+
     public boolean isShutdown() {
         if(executor == null) return true;
         else return executor.isShutdown();
@@ -61,7 +76,6 @@ public class CrawlerManager {
         }
         CrawlerThread crawlerThread = factory.getThread();
         crawlerThread.setSrc(url);
-//        System.out.println("Starting crawler for " + url.toString());
 		executor.execute(crawlerThread);
 	}
 
@@ -71,27 +85,19 @@ public class CrawlerManager {
     }
 
     /**
-     * TODO: Cleanup
      * @throws InterruptedException
      */
 	public void probe() throws InterruptedException {
 //		LOGGER.info(Thread.currentThread().getName() + " Probing to start new thread");
 
 		if(crawler == null) crawler = Crawler.getInstance(factory);
-//        if(crawler.doneCrawling()) {
-//            Thread.sleep(BaseConfig.DELAY);
-//        }
+
 		Thread.sleep(BaseConfig.DELAY);
         URL crawlURL = Util.getURL(crawler.getNext());
-//        System.out.println("probing!" + crawlURL.toString());
 
-        if(crawlURL != null) {
-            startCrawler(crawlURL);
-        } else {
-            LOGGER.severe("I AM SLEEPING!");
-            Thread.sleep(BaseConfig.DELAY);
-        }
-    }
+        if(crawlURL != null) startCrawler(crawlURL);
+        else Thread.sleep(BaseConfig.DELAY);
+   }
 
     public void queue(String link) {
         if(crawler == null)	crawler = Crawler.getInstance(factory);

@@ -13,7 +13,6 @@ import java.net.UnknownHostException;
 import java.util.List;
 import java.util.logging.Logger;
 
-import org.crawler.util.Constants;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
@@ -23,10 +22,8 @@ import org.jsoup.select.Elements;
  * The CrawlerThread
  *
  * Abstract class for the crawler thread. Implements the core run function
- * which opens a socket to the host, sends the header
+ * which opens a socket to the host, sends the headers and receives a response.
  *
- * TODO: Fix concurrency issues
- * TODO: USE HTTP library
  * @author angad
  *
  */
@@ -44,10 +41,10 @@ public abstract class CrawlerThread implements Runnable {
 	 */
 	private CrawlerManager crawlerManager;
 
-	/*
-	 * The response time
-	 */
-	private long responseTime;
+    private List<Header> headers;
+
+    private long responseTime;
+
 
 	/*
 	 * Constructor for this thread
@@ -61,106 +58,116 @@ public abstract class CrawlerThread implements Runnable {
         this.crawlURL = url;
     }
 
+    public void setHeaders(List<Header> headers) {
+        this.headers = headers;
+    }
+
+    private String request(String host, String path) {
+        Socket socket = null;
+        String htmlDoc = null;
+        try {
+            //Connect to the server
+            socket = new Socket(host, BaseConfig.HTTP_PORT);
+            socket.setSoTimeout(BaseConfig.SOCKET_TIMEOUT);
+
+            //Get an output stream
+            BufferedWriter out = new BufferedWriter(new
+                    OutputStreamWriter(socket.getOutputStream()));
+
+            //Send a request to get the root page of the server
+            out.write("GET " + path + " HTTP/1.0\n\n");
+            if(headers != null) {
+                for(int i=0; i<headers.size(); i++) {
+                    out.write(headers.get(i).toString());
+                }
+            } else {
+                out.write("User-Agent: Mozilla/5.0 (Windows NT 6.2; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/30.0.1599.17 Safari/537.36");
+            }
+            out.flush();
+
+            //we have sent it. get the sent time
+            long sentTime = System.currentTimeMillis();
+            BufferedReader in = new BufferedReader(new
+                    InputStreamReader(socket.getInputStream()));
+
+            //using a StringBuilder to store the content of the page
+            StringBuilder htmlBuilder = new StringBuilder();
+            String line;
+            boolean headerEnded = false;
+            while((line = in.readLine())!=null) {
+
+                //Separating the header from the content
+                if(line.equals("") && !headerEnded) {
+                    headerEnded = true;
+                    continue;
+                }
+
+                //append the content
+                if(headerEnded) htmlBuilder.append(line);
+            }
+
+            htmlDoc = htmlBuilder.toString();
+
+            in.close();
+
+            //we have completely received the page
+            long receivedTime = System.currentTimeMillis();
+            long responseTime = receivedTime - sentTime;
+        } catch (UnknownHostException e) {
+            LOGGER.severe("UnknownHostException: " + e.getMessage());
+        } catch (IOException e) {
+            LOGGER.severe("IOException: " + e.getMessage());
+        }
+        return htmlDoc;
+    }
+
 	/*
 	 * @see java.lang.Runnable#run()
 	 */
 	@Override
 	public void run() {
-		Socket socket = null;
-		try {
-            if(crawlURL == null || crawlURL.toString().equals("")) {
-                return;
-            }
-            String path = crawlURL.getPath().equals("") ? "/" : crawlURL.getPath();
-            String host = crawlURL.getHost();
+        if(crawlURL == null || crawlURL.toString().equals("")) {
+            return;
+        }
+        String path = crawlURL.getPath().equals("") ? "/" : crawlURL.getPath();
+        String host = crawlURL.getHost();
+        String htmlDoc = request(host, path);
+        crawlerManager.finishCrawler(this);
+        if(htmlDoc == null) {
+            LOGGER.severe("Could not get URL " + crawlURL.toString());
+            return;
+        }
 
-			//Connect to the server
-			socket = new Socket(host, Constants.HTTP_PORT);
-			socket.setSoTimeout(Constants.SOCKET_TIMEOUT);
-			//Get an output stream
-			BufferedWriter out = new BufferedWriter(new
-					OutputStreamWriter(socket.getOutputStream()));
-			
-			//Send a request to get the root page of the server
-			out.write("GET " + path + " HTTP/1.0\n\n");
-            out.write("User-Agent: Mozilla/5.0 (Windows NT 6.2; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/30.0.1599.17 Safari/537.36");
-			out.flush();
-			
-			//we have sent it. get the sent time
-			long sentTime = System.currentTimeMillis();
-//			LOGGER.info("Connected to " + socket.getInetAddress().toString());
+        Document doc = Jsoup.parse(htmlDoc);
 
-			//get the input stream reader
-			BufferedReader in = new BufferedReader(new
-					InputStreamReader(socket.getInputStream()));
-			
-			//using a StringBuilder to store the content of the page
-			StringBuilder htmlBuilder = new StringBuilder();
-			String line;
-			String htmlDoc;
-			boolean headerEnded = false;
-			while((line = in.readLine())!=null) {
-			
-				//Separating the header from the content
-				if(line.equals("") && !headerEnded) {
-					headerEnded = true;
-					continue;
-				}
-				
-				//append the content
-				if(headerEnded) htmlBuilder.append(line);
-			}
+        //Extract all the a links
+        Elements links = doc.select("a");
 
-			htmlDoc = htmlBuilder.toString();
-			
-			in.close();
-			
-			//we have completely received the page
-			long receivedTime = System.currentTimeMillis();
-			responseTime = receivedTime - sentTime;
-            finish();
+        //go through all the links and extract the href
+        for(Element link: links) {
+            String l = link.attr("href");
+            String html = link.html();
 
-//			LOGGER.info("Response time: " + (receivedTime - sentTime) + "ms");
-//			System.out.println(htmlDoc);
-//			Parse the document using Jsoup
-			Document doc = Jsoup.parse(htmlDoc);
-			
-			//Extract all the a links
-			Elements links = doc.select("a");
-			
-			//go through all the links and extract the href
-			for(Element link: links) {
-                String l = link.attr("href");
-                String html = link.html();
-                if(shouldCrawl(crawlURL, l, html)) {
-                    List<String> list = Util.getLinks(l);
-                    if(list !=null) {
-                        for(String i: list) {
-                            crawlerManager.queue(i);
-                        }
+            //check from user implemented function if shouldCrawl the URL
+            if(shouldCrawl(crawlURL, l, html)) {
+                List<String> list = Util.getLinks(l);
+                if(list !=null) {
+                    for(String i: list) {
+                        crawlerManager.queue(i);
                     }
-
                 }
-            }
 
-		} catch (UnknownHostException e) {
-			LOGGER.severe("UnknownHostException: " + e.getMessage());
-		} catch (IOException e) {
-			LOGGER.severe("IOException: " + e.getMessage());
-		}
-		
+            }
+        }
+
 	}
-	
+
 	public long getResponseTime() {
 		return responseTime;
 	}
-	
+
 	public URL getURL() {
 		return crawlURL;
-	}
-
-	private void finish() {
-		crawlerManager.finishCrawler(this);
 	}
 
 	protected abstract boolean shouldCrawl(URL base, String link, String html);

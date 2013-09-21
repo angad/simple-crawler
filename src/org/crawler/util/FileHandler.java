@@ -21,7 +21,6 @@ public class FileHandler {
 		try {
 		    FileWriter fstream = new FileWriter("result.log", true);
 		    out = new BufferedWriter(fstream);
-		    out.write("--------------Beginning crawling-----------------\n");
 		    out.flush();
 		}
 		catch (Exception e) {

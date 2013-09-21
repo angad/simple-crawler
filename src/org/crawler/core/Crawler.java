@@ -56,20 +56,40 @@ public class Crawler {
 	}
 
     public class Probe implements Runnable {
+        int tries = 0;
+        int maxTries = BaseConfig.PENDING_TIMEOUT / BaseConfig.PENDING_CHECK_RETRY;
+
         @Override
         public void run() {
             while(true) {
                 try {
-                    if(crawled.size() >= 5) {
-                        manager.stopCrawler();
-                        return;
+                    if(toCrawl.size() == 0 && manager.getCurrentSize() == 0) {
+                        tries++;
+//                        System.out.print("Try " + tries + "\r");
+                        if(tries == maxTries) {
+                            manager.stopCrawler();
+                            if(manager.getQueueSize() == 0) {
+                                System.exit(0);
+                            } else {
+                                System.out.println("Waiting for all threads to finish");
+                                Thread.sleep(BaseConfig.PENDING_CHECK_RETRY);
+                            }
+                        }
+                        Thread.sleep(BaseConfig.PENDING_CHECK_RETRY);
+                    } else {
+                        tries = 0;
                     }
 
                     if(toCrawl.size() > 0) {
-                        System.out.print("To crawl " + toCrawl.size() + ", Thread queue " + manager.getQueueSize() + "\r");
+                        System.out.print(
+                                "Completed: " + manager.getCompletedCount() + ", " +
+                                "Active: " + manager.getCurrentSize() + ", " +
+                                "Pending " + toCrawl.size() + ", " +
+                                "Thread queue " + manager.getQueueSize() + "\r"
+                        );
                         manager.probe();
                     } else {
-                        Thread.sleep(1000);
+                        Thread.sleep(BaseConfig.DELAY);
                     }
                 } catch (InterruptedException e) {
                     e.printStackTrace();
@@ -114,15 +134,10 @@ public class Crawler {
 		//if currently crawling or has already been crawled. then ignore
 		if(!(crawled.containsKey(url) || crawling.contains(url))) {
 			toCrawl.add(url);
-//            StringBuilder sb = new StringBuilder();
-//            for(int i = 0; i < toCrawl.size(); i++) {
-//                sb.append("#");
-//            }
 		}
 	}
 
 	/**
-     * TODO: make this cleaner
 	 * Manager calls this to get the next pending
 	 * @return
 	 */
@@ -135,13 +150,7 @@ public class Crawler {
         try {
             url = toCrawl.first();
         } catch (NoSuchElementException e) {
-//            try {
-//                url = toCrawl.last();
-//
-//            } catch (NoSuchElementException e2) {
                 LOGGER.severe("NO SUCH ELEMENT FOUND");
-//                return url;
-//            }
         }
 		toCrawl.remove(url);
 		crawling.add(url);

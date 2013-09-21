@@ -1,7 +1,7 @@
 package org.crawler.MyCrawler;
 
 import org.crawler.core.CrawlerThreadFactory;
-import org.crawler.Pair;
+import org.crawler.util.Pair;
 import org.crawler.core.CrawlerThread;
 
 import java.util.List;
