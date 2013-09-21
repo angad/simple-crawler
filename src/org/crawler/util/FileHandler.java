@@ -35,7 +35,6 @@ public class FileHandler {
 				out.write(str + "\n");
 				out.flush();
 			} catch (IOException e) {
-				// TODO Auto-generated catch block
 				e.printStackTrace();
 			}
 		}

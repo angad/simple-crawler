@@ -1,4 +1,6 @@
-package org.crawler;
+package org.crawler.core;
+
+import org.crawler.util.*;
 
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
@@ -6,9 +8,9 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.OutputStreamWriter;
 import java.net.Socket;
+import java.net.URL;
 import java.net.UnknownHostException;
-import java.util.LinkedHashSet;
-import java.util.Set;
+import java.util.List;
 import java.util.logging.Logger;
 
 import org.crawler.util.Constants;
@@ -18,29 +20,30 @@ import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
 
 /**
- * The CrawlerThread 
+ * The CrawlerThread
+ *
+ * Abstract class for the crawler thread. Implements the core run function
+ * which opens a socket to the host, sends the header
+ *
+ * TODO: Fix concurrency issues
+ * TODO: USE HTTP library
  * @author angad
  *
  */
-public class CrawlerThread implements Runnable {
+public abstract class CrawlerThread implements Runnable {
 
 	Logger LOGGER = Logger.getLogger(CrawlerThread.class.getName());
 
 	/*
 	 * The crawl URL passed to this Thread
 	 */
-	private String crawlURL;
+	private URL crawlURL;
 	
 	/*
 	 * An instance of the crawler to which the thread reports
 	 */
 	private CrawlerManager crawlerManager;
 
-	/*
-	 * A local set of links found by this thread
-	 */
-	private Set<String> localSet = new LinkedHashSet<String>();
-	
 	/*
 	 * The response time
 	 */
@@ -49,11 +52,14 @@ public class CrawlerThread implements Runnable {
 	/*
 	 * Constructor for this thread
 	 */
-	public CrawlerThread(String src) {
-		this.crawlURL = src;
-		crawlerManager = CrawlerManager.getInstance();
+	public CrawlerThread() {
+    	crawlerManager = CrawlerManager.getInstance();
 		responseTime = 0;
 	}
+
+    public void setSrc(URL url) {
+        this.crawlURL = url;
+    }
 
 	/*
 	 * @see java.lang.Runnable#run()
@@ -62,22 +68,28 @@ public class CrawlerThread implements Runnable {
 	public void run() {
 		Socket socket = null;
 		try {
+            if(crawlURL == null || crawlURL.toString().equals("")) {
+                return;
+            }
+            String path = crawlURL.getPath().equals("") ? "/" : crawlURL.getPath();
+            String host = crawlURL.getHost();
+
 			//Connect to the server
-			socket = new Socket(crawlURL, Constants.HTTP_PORT);
+			socket = new Socket(host, Constants.HTTP_PORT);
 			socket.setSoTimeout(Constants.SOCKET_TIMEOUT);
 			//Get an output stream
 			BufferedWriter out = new BufferedWriter(new
 					OutputStreamWriter(socket.getOutputStream()));
 			
 			//Send a request to get the root page of the server
-			out.write("GET / HTTP/1.0\n\n");
+			out.write("GET " + path + " HTTP/1.0\n\n");
+            out.write("User-Agent: Mozilla/5.0 (Windows NT 6.2; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/30.0.1599.17 Safari/537.36");
 			out.flush();
 			
 			//we have sent it. get the sent time
 			long sentTime = System.currentTimeMillis();
-			LOGGER.info("Connected to " + socket.getInetAddress().toString());
-//			LOGGER.info("Sent GET Request to " + crawlURL);
-			
+//			LOGGER.info("Connected to " + socket.getInetAddress().toString());
+
 			//get the input stream reader
 			BufferedReader in = new BufferedReader(new
 					InputStreamReader(socket.getInputStream()));
@@ -86,13 +98,11 @@ public class CrawlerThread implements Runnable {
 			StringBuilder htmlBuilder = new StringBuilder();
 			String line;
 			String htmlDoc;
-//			String type = "HEADER: ";
 			boolean headerEnded = false;
 			while((line = in.readLine())!=null) {
 			
 				//Separating the header from the content
 				if(line.equals("") && !headerEnded) {
-//					type = "CONTENT: ";
 					headerEnded = true;
 					continue;
 				}
@@ -107,70 +117,52 @@ public class CrawlerThread implements Runnable {
 			
 			//we have completely received the page
 			long receivedTime = System.currentTimeMillis();
-			responseTime = receivedTime - sentTime; 
+			responseTime = receivedTime - sentTime;
+            finish();
+
 //			LOGGER.info("Response time: " + (receivedTime - sentTime) + "ms");
 //			System.out.println(htmlDoc);
-			//Parse the document using Jsoup
+//			Parse the document using Jsoup
 			Document doc = Jsoup.parse(htmlDoc);
 			
 			//Extract all the a links
 			Elements links = doc.select("a");
 			
 			//go through all the links and extract the href
-			for(Element link: links) 
-				processLink(link.attr("href"));
+			for(Element link: links) {
+                String l = link.attr("href");
+                String html = link.html();
+                if(shouldCrawl(crawlURL, l, html)) {
+                    List<String> list = Util.getLinks(l);
+                    if(list !=null) {
+                        for(String i: list) {
+                            crawlerManager.queue(i);
+                        }
+                    }
+
+                }
+            }
 
 		} catch (UnknownHostException e) {
-			LOGGER.severe(" host error: " + crawlURL + " "  + e.getMessage() );
+			LOGGER.severe("UnknownHostException: " + e.getMessage());
 		} catch (IOException e) {
-			LOGGER.severe(" host error: " + crawlURL + " "  + e.getMessage() );
+			LOGGER.severe("IOException: " + e.getMessage());
 		}
 		
-		finish();
-	}
-	
-	
-	public Set<String> getLinks() {
-		return localSet;
 	}
 	
 	public long getResponseTime() {
 		return responseTime;
 	}
 	
-	public String getURL() {
+	public URL getURL() {
 		return crawlURL;
 	}
-	
-	/**
-	 * Submit the links to the CrawlerManager
-	 */
+
 	private void finish() {
 		crawlerManager.finishCrawler(this);
 	}
-	
-	/**
-	 * Process the Link and add it to the local set
-	 * @param link
-	 */
-	private void processLink(String link) {
-		String serverAddress = getServerAddress(link);
-		if(!serverAddress.isEmpty()) {
-			localSet.add(serverAddress);
-		}
-	}
-	
-	/**
-	 * Get the server address from the link
-	 * @param link
-	 * @return
-	 */
-	private String getServerAddress(String link) {
-		String serverAddress;
-		String pattern = "^((http|https|ftp|file)://)|^#"; //checks for http, https, ftp, file
-		serverAddress = link.replaceFirst(pattern, "").split("/")[0];
-		if(!serverAddress.contains(".")) return "";
-		if(serverAddress.endsWith("html")) return "";
-		return serverAddress;	
-	}
+
+	protected abstract boolean shouldCrawl(URL base, String link, String html);
+
 }
